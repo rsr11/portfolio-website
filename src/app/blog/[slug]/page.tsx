@@ -2,12 +2,9 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { MDXRemote } from "next-mdx-remote/rsc";
-import remarkGfm from "remark-gfm";
-import rehypeSlug from "rehype-slug";
-import rehypePrettyCode from "rehype-pretty-code";
 import { formatDate, getAllPosts, getPost } from "@/lib/blog";
 import AuthorRow from "@/components/AuthorRow";
+import PostBody from "@/components/PostBody";
 
 // export const dynamicParams = false;
 
@@ -51,15 +48,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         )}
 
         <div className="prose mt-10 max-w-none dark:prose-invert prose-headings:tracking-[-0.03em] prose-a:text-accent">
-          <MDXRemote
-            source={content}
-            options={{
-              mdxOptions: {
-                remarkPlugins: [remarkGfm],
-                rehypePlugins: [rehypeSlug, [rehypePrettyCode, { theme: "github-dark" }]],
-              },
-            }}
-          />
+           <PostBody source={content} />
         </div>
       </article>
     </main>
