@@ -92,7 +92,7 @@ const go = (e: React.MouseEvent, href: string) => {
             </nav>
 
             <div className="relative hidden aspect-square md:block">
-              <Image src="/images/menu-sun.png" alt="" fill className="object-cover" />
+             <Image src="/images/menu-sun.png" alt="" fill sizes="(min-width: 768px) 33vw, 0px" className="object-cover" />
             </div>
           </div>
 

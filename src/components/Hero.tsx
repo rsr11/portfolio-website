@@ -26,7 +26,7 @@ export default function Hero() {
         className="absolute left-[10%] top-[46%] z-20 aspect-square w-[38vw] md:w-[42vw] max-w-[230px]
                    md:left-[38%] md:top-[50%] md:w-[clamp(120px,16vw,230px)]"
       >
-        <Image src="/images/hero.png" alt="" fill className="object-cover shadow-2xl" />
+        <Image src="/images/hero.png" alt="" fill sizes="(min-width: 768px) 42vw, 38vw" className="object-cover shadow-2xl" />
       </motion.div>
 
       <svg
