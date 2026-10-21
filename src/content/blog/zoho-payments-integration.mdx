@@ -1,0 +1,294 @@
+---
+title: "Zoho Payments Integration (Backend)"
+date: "2026-08-05"
+summary: "The OAuth setup, backend code and webhook handling for Zoho Payments, plus seven gotchas that cost real debugging time."
+tags: ["Zoho Payments", "Payment Gateway", "Node.js", "Backend"]
+cover: "/images/blog/zoho-payments.png"
+draft: false
+---
+
+If you've landed here because you Googled "Zoho Payments integration" and found three outdated forum posts and a wall of reference docs with no working example, same. This is the article I needed a few weeks ago, written after actually shipping a real integration: an appointment-booking backend that takes payment before confirming a slot.
+
+Zoho Payments works fine once it's wired up. Getting there is the hard part, mostly because the docs describe endpoints, not flows, and a few of the gotchas below cost real debugging hours. This is the flow, the code, and, more usefully, the exact mistakes to skip.
+
+## The mental model first
+
+Before any code, understand that Zoho Payments needs two separate, unrelated credentials, and almost every early confusion traces back to mixing them up:
+
+| Credential | Used for | Lives in |
+|---|---|---|
+| API key | Frontend checkout widget only | Your frontend code |
+| Signing key | Verifying webhook authenticity | Your backend, webhook handler only |
+| OAuth (Client ID / Secret / Refresh Token) | All server-side API calls (creating a payment session) | Your backend |
+
+The API key you see front-and-center on the Zoho Payments dashboard is not enough to create a payment session from your server. That single misunderstanding is where most first attempts stall out. Server-side calls need an OAuth access token, obtained via a refresh token you generate once.
+
+## The full flow, end to end
+
+```text
+1. Patient/customer clicks "Pay"
+        │
+        ▼
+2. Your backend calls Zoho: "create a payment session"
+   (needs OAuth access token)
+        │
+        ▼
+3. Zoho returns a payments_session_id
+        │
+        ▼
+4. Your frontend opens Zoho's checkout widget
+   using that session_id + your API key
+        │
+        ▼
+5. Customer pays (card/UPI/whatever)
+        │
+        ▼
+6. Zoho sends a WEBHOOK to your backend, server-to-server
+   ("payment.succeeded" / "payment.failed")
+        │
+        ▼
+7. Your backend verifies the webhook signature,
+   then updates your database (order paid, booking confirmed, etc.)
+```
+
+Step 6 is the one people skip in their mental model and then get bitten by. The frontend widget resolving successfully is not proof of payment. It's a nice-to-have for immediate UI feedback, but the webhook is your actual source of truth: it's signed, server-to-server, and can't be spoofed by a browser. Design your backend so nothing important (marking an order paid, confirming a booking) happens until the webhook says so.
+
+## Part 1: The one-time OAuth setup
+
+This is the part with no good existing writeup, so here it is in full.
+
+### Step 1: Register an ORG-scoped OAuth client
+
+Most Zoho tutorials tell you to register your app through the regular "Add Client" page. Don't use that one for Zoho Payments. It needs a different, special version of that same page, made specifically for payments.
+
+```text
+https://api-console.zoho.in/add?client_type=ORG
+```
+
+(Swap `.in` for `.com`, `.eu`, etc. depending on your Zoho data center. More on this below.)
+
+Fill in a Client Name, Homepage URL, and a Redirect URI. The redirect URI doesn't need to be a real, functioning page. You'll only use it once, manually, to read a code out of the browser's address bar. Register it, and you get a Client ID and Client Secret.
+
+### Step 2: Get an authorization code
+
+Build this URL (all values are yours from Step 1, plus your Zoho Payments account_id, visible in your dashboard's Account Details):
+
+```text
+https://accounts.zoho.in/oauth/v2/org/auth?
+  scope=ZohoPay.payments.CREATE,ZohoPay.payments.READ
+  &client_id=YOUR_CLIENT_ID
+  &soid=zohopay.YOUR_ACCOUNT_ID
+  &response_type=code
+  &redirect_uri=YOUR_REDIRECT_URI
+  &access_type=offline
+```
+
+Open it in a browser, log in as an Account Owner/Admin, and approve the consent screen. You'll get redirected with `?code=...` in the URL. Copy it immediately, because it expires in about 60 seconds.
+
+### Step 3: Exchange the code for a refresh token
+
+```bash
+curl -X POST "https://accounts.zoho.in/oauth/v2/token?code=THE_CODE&client_id=YOUR_CLIENT_ID&client_secret=YOUR_CLIENT_SECRET&redirect_uri=YOUR_REDIRECT_URI&grant_type=authorization_code"
+```
+
+The response includes a `refresh_token`. This is the only value you actually need to keep. It doesn't expire on a timer. Save it to your environment config, and your backend will use it forever to mint fresh access tokens as needed.
+
+> ⚠️ The `soid` parameter is easy to miss and undocumented in most walkthroughs. Without it, you'll get a cryptic `invalid_client` error even with a perfectly valid client. It's what tells Zoho this is an organization-level auth request, not a personal one.
+
+## Part 2: The backend code
+
+Here's a minimal, working Zoho Payments client module (Node/Express, but the shape translates to any backend). `cache` is whatever cache you use (Redis, an in-memory map), and `parseWebhookEvent` and `handlePaymentEvent` further down are your own code.
+
+```js
+import axios from 'axios';
+import crypto from 'node:crypto';
+
+const paymentsHttp = axios.create({
+  baseURL: process.env.ZOHO_PAYMENTS_BASE_URL,
+  // set this to your regional Zoho Payments API base, e.g. payments.zoho.in/api/v1
+});
+
+const accountsHttp = axios.create({
+  baseURL: process.env.ZOHO_ACCOUNTS_BASE_URL,
+  // set this to your regional Zoho accounts base, e.g. accounts.zoho.in
+});
+
+// --- OAuth: exchange refresh token for a fresh access token ---
+async function getAccessToken() {
+  const cached = await cache.get('zoho:access_token');
+  if (cached) return cached;
+
+  const { data } = await accountsHttp.post('/oauth/v2/token', null, {
+    params: {
+      refresh_token: process.env.ZOHO_REFRESH_TOKEN,
+      client_id: process.env.ZOHO_CLIENT_ID,
+      client_secret: process.env.ZOHO_CLIENT_SECRET,
+      grant_type: 'refresh_token',
+    },
+  });
+
+  // IMPORTANT - see gotcha #2 below before trusting expires_in blindly
+  const ttl = Math.min(Math.max((data.expires_in || 3600) - 120, 60), 3600);
+  await cache.set('zoho:access_token', data.access_token, ttl);
+  return data.access_token;
+}
+
+// --- Create a payment session ---
+export async function createPaymentSession({ orderId, amount, currency, invoiceNumber }) {
+  const token = await getAccessToken();
+
+  const { data } = await paymentsHttp.post(
+    '/paymentsessions',
+    {
+      amount: Number(amount),
+      currency,
+      expires_in: 600, // seconds, Zoho's allowed range is 300-900
+      invoice_number: invoiceNumber,
+      meta_data: [{ key: 'orderId', value: String(orderId) }], // your own reference, see gotcha #3
+    },
+    {
+      params: { account_id: process.env.ZOHO_ACCOUNT_ID },
+      headers: { Authorization: `Zoho-oauthtoken ${token}` },
+    }
+  );
+
+  const session = data.payments_session;
+  return {
+    paymentsSessionId: session.payments_session_id,
+    amount: session.amount,
+    currency: session.currency,
+  };
+}
+
+// --- Verify a webhook came from Zoho ---
+export function verifyWebhookSignature(rawBody, signatureHeader) {
+  if (!signatureHeader) return false;
+
+  const parts = Object.fromEntries(
+    signatureHeader.split(',').map((kv) => kv.split('='))
+  );
+  const { t: timestamp, v: providedSignature } = parts;
+
+  const age = Date.now() - Number(timestamp);
+  if (age < 0 || age > 5 * 60 * 1000) return false; // reject anything older than 5 min
+
+  const expected = crypto
+    .createHmac('sha256', process.env.ZOHO_SIGNING_KEY)
+    .update(`${timestamp}.${rawBody}`)
+    .digest('hex');
+
+  const a = Buffer.from(providedSignature);
+  const b = Buffer.from(expected);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+```
+
+### The frontend widget
+
+The backend hands the frontend a `paymentsSessionId`. The frontend does the rest with your API key (not any OAuth credential):
+
+```html
+<script src="https://static.zohocdn.com/zpay/zpay-js/v1/zpayments.js"></script>
+<script>
+  const instance = new window.ZPayments({
+    account_id: 'YOUR_ACCOUNT_ID',
+    domain: 'IN', // or US/EU per your data center
+    otherOptions: { api_key: 'YOUR_API_KEY' },
+  });
+
+  instance.requestPaymentMethod({
+    amount: '299.00',
+    currency_code: 'INR',
+    payments_session_id: sessionIdFromYourBackend,
+  });
+</script>
+```
+
+### The webhook handler
+
+The part that actually matters for correctness:
+
+```js
+app.post('/payment/webhook', async (req, res, next) => {
+  const signatureHeader = req.headers['x-zoho-webhook-signature']; // exact header, see gotcha #4
+  const rawBody = req.rawBody; // see gotcha #5 - this must be the EXACT raw bytes
+
+  if (!verifyWebhookSignature(rawBody, signatureHeader)) {
+    return res.status(401).json({ success: false });
+  }
+
+  const event = parseWebhookEvent(req.body);
+  await handlePaymentEvent(event); // your own DB update logic
+
+  return res.status(200).json({ success: true });
+});
+```
+
+Two setup details this snippet assumes, both easy to miss:
+
+```js
+// In your Express app setup - you need the RAW bytes, not the
+// re-serialized object, or signature verification will always fail.
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
+```
+
+## Gotchas that will cost you real time (learn from mine)
+
+### 1. Data-center mismatch gives `invalid_client`
+
+Zoho segregates accounts and OAuth clients by data center (`.com`, `.in`, `.eu`, `.com.au`). A client registered at `api-console.zoho.com` simply does not exist if you authenticate against `accounts.zoho.in`. If you get `invalid_client` and you're sure your credentials are right, this is almost always it. Match the console domain to the domain your Payments account actually lives on.
+
+### 2. `expires_in` may come back in milliseconds, not seconds
+
+Standard OAuth convention is seconds. In testing, I received `expires_in: 3600000`, which, read as seconds, means "cache this token for 41 days." A stale token then silently breaks every payment attempt until someone notices and manually clears the cache. Always clamp your cache TTL to a hard ceiling (`Math.min(yourCalculatedTtl, 3600)`), regardless of what the API claims. Defensive code here is cheap insurance.
+
+### 3. Don't trust `reference_number` if you share a Zoho account across products
+
+If more than one system in your company uses the same Zoho Payments account (common: one account, multiple products), Zoho fires every webhook event to every registered webhook URL, regardless of which system created the payment. Filter by something only you set, your own `meta_data` key, never by `reference_number`, which other systems can and will populate with their own differently-shaped values. Skip (return 200 OK, don't process) anything without your expected `meta_data` key instead of erroring. Otherwise you'll flood your own logs with "failed" webhook deliveries for events that were never yours to handle.
+
+### 4. The signature header is `X-Zoho-Webhook-Signature`, not `X-Zoho-Signature`
+
+Easy typo, and unless you go looking, nothing tells you it's wrong. `verifyWebhookSignature` just quietly returns false for a missing header, which looks identical to a genuine signature mismatch.
+
+### 5. Raw body capture is mandatory
+
+`JSON.stringify(req.body)` is not a valid substitute. HMAC signatures are computed over exact bytes. If your body-parsing middleware doesn't capture the raw buffer before parsing, and your webhook handler falls back to re-serializing the already-parsed object, you'll get a different byte sequence than what was signed. Verification fails, even with the correct signing key. This bug is sneaky because everything else looks right.
+
+### 6. Your account-level signing key and your per-webhook signing key can be different
+
+If you configure a webhook subscription individually (rather than using a single account-wide setting), check whether that specific subscription has its own signing key separate from the general one shown on your main dashboard. Using the wrong one produces a signature that's structurally valid (right length, right format) but numerically completely different. If you're debugging blind, that looks identical to "everything's broken" rather than "one specific value is wrong."
+
+### 7. `event_id` ≠ `payment_id` ≠ `transaction_reference_number`
+
+Three different identifiers show up in a webhook payload, and it's easy to grab the wrong one:
+
+- `event_id` identifies this webhook delivery, not the payment. It can repeat across retries.
+- `payment_id` is Zoho's own internal ID for the actual transaction. Good for calling Zoho's API back.
+- `transaction_reference_number` is the underlying bank/UPI network's own reference. Good for reconciliation against a bank statement or a customer support query ("I paid but it's not showing").
+
+Store whichever one you'll actually need to look something up by later, possibly both.
+
+## Testing without burning real transactions
+
+Zoho has a genuine sandbox environment (`paymentssandbox.zoho.in`), but it's not self-serve. You need to request it from Zoho support to get it enabled. Once enabled, the OAuth flow is nearly identical, with two differences:
+
+- The scope prefix changes from `ZohoPay.` to `ZohoPaySandbox.`
+- You need a `soid=zohopaysandbox.{sandbox_account_id}` parameter instead
+
+If sandbox access isn't available yet, testing with tiny real amounts (₹1–2) against live mode works fine for verifying the full flow end-to-end. Just be aware `live_mode: true` will show up in your webhook payloads.
+
+For local development, a devtunnel/ngrok-exposed local server works for receiving real webhooks. Remember that tunnel URLs are usually session-based and die when your terminal closes, so you'll need to re-register the webhook URL in Zoho's dashboard if it changes.
+
+## The short version, if you skip everything else
+
+- API key ≠ OAuth credentials. You need both, for different halves of the flow.
+- The webhook, not the frontend widget's return value, is your source of truth.
+- Match your OAuth client's data center to your account's data center.
+- Clamp your token cache TTL defensively. Don't trust `expires_in`'s unit blindly.
+- Capture the raw request body before your JSON parser touches it.
+- If your Zoho account is shared across products, filter webhooks by your own `meta_data`, never by `reference_number`.
+- The webhook signature header is `X-Zoho-Webhook-Signature`.
+
+Hopefully this saves the next person the debugging cycles it took to write it.

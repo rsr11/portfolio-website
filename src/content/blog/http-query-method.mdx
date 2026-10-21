@@ -1,0 +1,144 @@
+---
+title: "New REST API Method: QUERY"
+date: "2026-07-09"
+summary: "GET URLs get too long and POST isn't meant for reads. The new HTTP QUERY method (RFC 10008) fixes both."
+tags: ["REST API", "Backend", "System Design"]
+cover: "/images/blog/http-query-method.webp"
+draft: false
+---
+
+## Introduction
+
+When we talk about REST APIs, we usually think of four primary HTTP methods:
+
+- GET
+- POST
+- PUT
+- DELETE
+
+(Although REST APIs also commonly use methods like PATCH, HEAD, OPTIONS, and others.)
+
+For years, developers faced a common problem: **how do you perform complex read operations without creating extremely long URLs or misusing POST requests?**
+
+To solve this, the Internet Engineering Task Force (IETF) introduced a new HTTP method called **QUERY**, standardized in **RFC 10008** in June 2026.
+
+QUERY brings together the advantages of GET and POST while avoiding their limitations.
+
+## What is the QUERY method?
+
+`QUERY` is a new HTTP request method designed for **safe read operations that require a request body**.
+
+Unlike GET, which typically passes parameters through the URL, QUERY lets clients send complex search criteria inside the request body.
+
+Unlike POST, QUERY is explicitly defined as **safe** and **idempotent**. That means:
+
+- It never changes server data.
+- Calling it multiple times produces the same result (assuming the underlying data has not changed).
+- It is intended only for retrieving information.
+
+## Why was QUERY introduced?
+
+Before QUERY, developers had two choices for complex searches.
+
+### Option 1: Use GET
+
+For simple requests, GET works perfectly.
+
+```http
+GET /products?category=laptop&brand=apple&page=2&sort=price
+```
+
+But as filtering gets more sophisticated, URLs get very long.
+
+```http
+GET /products?category=laptop&brand=apple&price_gt=1000&price_lt=3000&rating_gt=4&color=silver&memory=16GB&storage=512GB&page=2&limit=20&sort=rating
+```
+
+Problems include:
+
+- Long and difficult-to-read URLs
+- URL length limitations
+- Difficult maintenance
+- Challenges with nested objects
+
+### Option 2: Use POST
+
+Many APIs started using POST for search operations.
+
+```http
+POST /products/search
+```
+
+```json
+{
+  "category": "Laptop",
+  "brand": "Apple",
+  "price": { "gte": 1000, "lte": 3000 }
+}
+```
+
+This solved the URL problem, but POST semantically represents an operation that **may change server state**. As a result:
+
+- caches treat POST differently,
+- intermediaries cannot safely assume the request is read-only,
+- API semantics become less clear.
+
+Developers were using POST for something it wasn't designed for.
+
+## Enter QUERY
+
+QUERY solves both problems.
+
+Like POST, it supports a request body and complex JSON structures. Like GET, it is safe, idempotent and designed purely for data retrieval.
+
+```http
+QUERY /orders HTTP/1.1
+Host: api.example.org
+Content-Type: application/json
+Accept: application/json
+```
+
+```json
+{
+  "select": ["id", "status", "total"],
+  "filter": { "status": "active", "total_gt": 100 },
+  "limit": 10
+}
+```
+
+Instead of squeezing everything into the URL, the client sends a structured JSON document.
+
+## GET vs POST vs QUERY
+
+| | GET | POST | QUERY |
+|---|---|---|---|
+| Request body | Not typically used | Yes | Yes |
+| Safe (read-only) | Yes | No | Yes |
+| Idempotent | Yes | No | Yes |
+| Complex filters | Awkward in the URL | Yes | Yes |
+
+## Where it helps
+
+QUERY is useful for APIs with rich search, such as:
+
+- E-commerce product search
+- Analytics dashboards
+- Financial reporting
+- Business intelligence tools
+- CRM and ERP systems
+- Log search platforms
+
+## Benefits of QUERY
+
+- **Cleaner URLs:** complex filters stay in the body.
+- **Better readability:** structured JSON is easier to maintain.
+- **Nested filters:** objects and arrays are represented naturally.
+- **Clear semantics:** the method says the request is read-only.
+- **Better caching potential:** caches can reason about it more easily than POST, subject to implementation support.
+- **Future-proof design:** APIs can evolve without ever-longer query strings.
+
+## Conclusion
+
+The HTTP QUERY method is an important step in API design. For years, developers had to choose between unwieldy GET URLs and semantically wrong POST requests for complex searches.
+
+QUERY combines the expressive body of POST with the safety and idempotency of GET. As support for RFC 10008 spreads across servers, frameworks and client libraries, it could become the default choice for advanced read operations in modern web APIs.
