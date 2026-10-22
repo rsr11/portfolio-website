@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { projects } from "@/content/projects";
+import { Suspense } from "react";
 
 // export const dynamicParams = false;
 
@@ -25,7 +26,17 @@ export async function generateMetadata({
   };
 }
 
-export default async function ProjectPage({
+
+export default function ProjectPage({ params }: { params: Promise<{ slug: string }> }) {
+  return (
+    <Suspense fallback={<main className="frame min-h-screen" />}>
+      <ProjectContent params={params} />
+    </Suspense>
+  );
+}
+
+
+export async function ProjectContent({
   params,
 }: {
   params: Promise<{ slug: string }>;

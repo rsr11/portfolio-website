@@ -1,9 +1,9 @@
 import type { IconType } from "react-icons";
-import { FaAws } from "react-icons/fa6";
+import { FaAws,FaJava  } from "react-icons/fa6";
 import {
   SiNodedotjs, SiExpress, SiReact, SiNextdotjs, SiPostgresql, SiDocker, SiNginx,
   SiApachekafka, SiRedis, SiTailwindcss, SiFramer, SiGreensock, SiThreedotjs,
-  SiDjango, SiFlask, SiPhp, SiShopify, SiReactquery, SiDotnet,
+  SiDjango, SiFlask, SiPhp, SiShopify, SiReactquery, SiDotnet,SiZoho,SiPostman, SiTypescript , SiSpringboot 
 } from "react-icons/si";
 import type { Tech } from "@/content/experience";
 
@@ -28,6 +28,11 @@ const icons: Record<Tech, { Icon: IconType; label: string }> = {
   shopify: { Icon: SiShopify, label: "Shopify" },
   reactquery: { Icon: SiReactquery, label: "React Query" },
   dotnet: { Icon: SiDotnet, label: ".NET" },
+  zoho : {Icon : SiZoho, label: "zoho"},
+  Postman : {Icon: SiPostman , label:"Postman"},
+  typescript : {Icon : SiTypescript , label:"typescript"},
+  java : {Icon : FaJava , label:"java"},
+  springboot : {Icon : SiSpringboot , label : "springboot"}
 };
 
 export default function TechIcon({ tech }: { tech: Tech }) {

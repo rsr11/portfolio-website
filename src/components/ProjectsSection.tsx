@@ -21,22 +21,44 @@ function Card({ p, className }: { p: Project; className: string }) {
         src={p.image}
         alt={p.title}
         fill
-        sizes="(min-width: 1024px) 33vw, 100vw"
+        sizes="(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw"
         className="object-cover transition duration-500 group-hover:scale-105"
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100" />
-      <div className="absolute inset-x-0 bottom-0 translate-y-2 p-4 text-white opacity-0 transition duration-300 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:opacity-100">
-        <p className="text-lg font-semibold">{p.title}</p>
-        <p className="mt-1 text-sm text-white/80">{p.description}</p>
-        <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.05em] text-white/70">
-          {p.tags.join(" · ")}
-        </p>
-      </div>
+
+      {/* always-on gradient so text is readable on any image */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
+
       {p.status && (
         <span className="absolute left-3 top-3 rounded-md bg-black/70 px-2 py-1 font-mono text-[11px] uppercase tracking-[0.05em] text-[#ffd94d]">
           {p.status}
         </span>
       )}
+
+      <span
+        aria-hidden
+        className="absolute right-3 top-3 grid size-9 -translate-y-1 place-items-center rounded-full bg-white/90 text-black opacity-0 transition duration-300 group-hover:translate-y-0 group-hover:opacity-100"
+      >
+        ↗
+      </span>
+
+      <div className="absolute inset-x-0 bottom-0 p-4 text-white md:p-5">
+        <h3 className="text-xl font-semibold tracking-[-0.03em]">{p.title}</h3>
+
+        <p className="mt-1 line-clamp-2 text-sm text-white/80 md:max-h-0 md:overflow-hidden md:opacity-0 md:transition-all md:duration-300 md:group-hover:max-h-12 md:group-hover:opacity-100">
+          {p.description}
+        </p>
+
+        <ul className="mt-3 flex flex-wrap gap-1.5">
+          {p.tags.slice(0, 3).map((t) => (
+            <li
+              key={t}
+              className="rounded-full bg-white/15 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.05em] backdrop-blur-sm"
+            >
+              {t}
+            </li>
+          ))}
+        </ul>
+      </div>
     </Link>
   );
 }

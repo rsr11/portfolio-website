@@ -25,7 +25,7 @@ export default function Footer() {
 
         <a
           href="mailto:rajeshwar.singh45411@gmail.com"
-          className="mt-8 inline-block rounded-full bg-accent px-6 py-3 text-sm font-semibold text-black transition hover:opacity-80"
+          className="mt-8 inline-block rounded-full bg-accent px-6 py-3 text-sm font-semibold text-[var(--on-accent)] transition hover:opacity-80"
         >
           Say hello ↗
         </a>

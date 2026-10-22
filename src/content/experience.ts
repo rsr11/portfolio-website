@@ -1,7 +1,7 @@
 export type Tech =
   | "node" | "express" | "react" | "next" | "postgres" | "docker" | "nginx"
   | "aws" | "kafka" | "redis" | "tailwind" | "framer" | "gsap" | "three"
-  | "django" | "flask" | "php" | "shopify" | "reactquery" | "dotnet";
+  | "django" | "flask" | "php" | "shopify" | "reactquery" | "dotnet" | "zoho" | "Postman" | "typescript" | "java" | "springboot";
 
 export interface Experience {
   slug: string;
@@ -21,7 +21,7 @@ export const experience: Experience[] = [
     role: "Software Engineer",
     start: "May 2026",
     end: "Present",
-    tech: ["react", "node", "express", "postgres", "docker", "nginx", "aws"],
+    tech: ["react", "node", "express", "postgres", "docker", "nginx", "aws","zoho","redis","next"],
     highlights: [
       "Core engineer on a healthcare SaaS for appointment booking, patient management and lab operations (AppointMyDoctor for patients, MediSetu for clinics).",
       "Cut API response latency from 100–200 ms to 3–5 ms by optimizing backend APIs and database queries.",
@@ -35,7 +35,7 @@ export const experience: Experience[] = [
     role: "Full Stack Developer",
     start: "Feb 2026",
     end: "May 2026",
-    tech: ["node", "express", "postgres", "aws", "react"],
+    tech: ["node", "express", "postgres", "aws", "react","next"],
     highlights: [
       "Designed a multi-tenant architecture with isolated per-company databases for a SaaS platform.",
       "Built and maintained 30+ REST APIs with JWT authentication and RBAC across 5+ user roles.",
@@ -61,7 +61,7 @@ export const experience: Experience[] = [
     role: "Full-Stack Developer",
     start: "Aug 2024",
     end: "Present",
-    tech: ["next", "react", "gsap", "framer", "three", "django", "flask", "php", "shopify"],
+    tech: ["next", "react", "gsap", "framer", "django", "flask", "php", "shopify","springboot"],
     highlights: [
       "Design, build and deploy end-to-end websites for independent clients, including legacy-marble.com and skilltyro.com.",
       "Animated front-ends with GSAP, Framer Motion and Three.js.",
