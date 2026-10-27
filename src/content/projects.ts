@@ -18,33 +18,40 @@ export const projects: Project[] = [
   {
     slug: "appointmydoctor",
     title: "AppointMyDoctor",
-    description: "Patient-facing platform to find doctors and book appointments.",
+    description: "The patient app of a healthcare platform for clinics. Find a doctor, pick a slot, pay online and book through the app or WhatsApp, and manage health records for up to four family members.",
     tags: ["React", "Node.js", "PostgreSQL","Meta API","Zoho"],
     image: "/images/projects/appointmydoctor.png",
     url: "www.appointmydoctor.in", // TODO: live link
     year: "2026",
     role: "Software Engineer",
     overview:
-      "The patient side of a healthcare SaaS. Patients find doctors, book appointments and get updates, while clinics run their side on MediSetu.",
+      "AppointMyDoctor is the patient-facing side of a healthcare SaaS built for clinics, while the clinics run their side on MediSetu. Patients search for doctors and clinics by name, rating, experience or symptoms. The booking flow is the same everywhere: choose the doctor, choose the time slot, then pay online to confirm. It works in the app or over WhatsApp. Patients can also create their ABHA health ID, keep their health records in one place, and book for up to four family members from a single account.",
     highlights: [
-      "Cut API response latency from 100–200 ms to 3–5 ms by optimizing backend APIs and database queries.",
-      "Integrated Zoho payments for bookings and invoices, and the Meta WhatsApp API for patient communication.",
-      "Added real-time in-app notifications with Server-Sent Events, and ABHA health-ID linking.",
+      "Search by doctor name, rating, experience or symptoms, so patients can find care even when they don’t know which specialist they need.",
+      "One booking flow across the app and WhatsApp: doctor, slot, online payment.",
+      "Online payments for bookings and invoices with the Zoho payment gateway, and patient messages through the Meta WhatsApp API.",
+      "ABHA (Ayushman Bharat Health Account) integration for creating and linking a patient’s health ID.",
+      "Real-time in-app notifications with Server-Sent Events.",
+      "Cut API response time from 100–200 ms to 3–5 ms by optimizing backend APIs and database queries.",
+      "Deployed with Docker, with Nginx as a reverse proxy that blocks unauthorized API endpoints, and monitored with AWS CloudWatch."
     ],
   },
   {
     slug: "legacy-marble",
     title: "Legacy Marble",
     description: "Animated marketing website for a marble business.",
-    tags: ["Next.js", "GSAP", "SEO"],
+    tags: ["Next.js", "GSAP", "SEO","Blog","Freelance"],
     image: "/images/projects/legacy-marble.png",
     url: "https://legacy-marble.com",
     year: "2026",
     role: "Freelance Full-Stack Developer",
-    overview: "A marble-seller need a website that can showcase their work and their catalogue.",
+    overview: "The owner of Legacy Marble wanted a website that shows what the business sells, builds trust with testimonials from past clients, and ranks on search through a blog. They also wanted the site to feel interactive and not like a plain catalogue. I designed, built and deployed it end to end as a freelance project, with animated, interactive front-end work using GSAP, Framer Motion and Three.js.",
     highlights: [
-      "Animated front-end built with GSAP, Framer Motion.",
-      "increase the rank in SEO, with multiple keywords.",
+      "Product showcase so visitors can see what the business sells.",
+      "Testimonials section that puts real client feedback in front of new customers.",
+      "Blog set up for SEO, so the business can be found through search.",
+      "Interactive, animated front-end built with GSAP, Framer Motions.",
+      "Delivered start to finish by me: design, build and deployment."
     ],
   },
   {
@@ -74,13 +81,15 @@ export const projects: Project[] = [
   {
     slug: "productr",
     title: "Productr",
-    description: "It is a Project with Orufy Technology",
+    description: "A product management and CRM platform where you list items, set them live or archive them, and manage multiple product images with drag and drop.",
     tags: ["React.js","Node.js","Email","Cloudnary","MongoDb"],
     image: "/images/projects/productr.png",
     url: "", // TODO: live link
     year: "2025",
     role: "",
-    overview: "Productr is a MERN project that is given by Orufy Technology as Assignment, have to submit it before 15th Jan 2026",
-    highlights: ["Product Management"],
+    overview: "Productr is a web platform for managing a product catalogue. You add products, publish them to make them live, or archive them when they’re no longer sold. Each product can have several images, and you change or reorder them by dragging and dropping.",
+    highlights: ["Add and manage products from a single CRM-style dashboard.","Switch any product between live and archived.","Multiple images per product, changed with drag and drop."
+
+    ],
   },
 ];
