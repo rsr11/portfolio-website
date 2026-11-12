@@ -1,0 +1,167 @@
+---
+title: "How to Undo a Pushed Commit in Git: reset vs revert vs force-with-lease"
+date: "2026-11-12"
+summary: "git reset --hard only changes your local history. Here's how to undo a pushed commit safely with git revert or --force-with-lease."
+tags: ["Git", "Version Control", "Developer Workflow"]
+cover: "/images/blog/undo-pushed-commit-git.png"
+draft: false
+---
+
+## Introduction
+
+A few weeks ago my team decided that one of my pushed commits wasn't needed anymore. Easy, I thought. Move the branch back by one commit and move on.
+
+I ran `git reset --hard HEAD~1`, felt good about it, and then Git told me this:
+
+```text
+Your branch is behind 'origin/feature/x' by 1 commit, and can be fast-forwarded.
+```
+
+Behind? I had just removed that commit. That message made me properly understand something I'd only half known: **`git reset` changes your local history. It does not touch GitHub.**
+
+This post walks through what happened, how I checked it, and how to fix it safely on a shared branch.
+
+## What `git reset --hard HEAD~1` actually does
+
+It moves your local branch pointer one commit back, and resets your index and tracked files to match. Nothing more.
+
+The remote branch (`origin/feature/x`) is a separate thing. It still points at the commit you just "removed". Your branch is now one commit behind the remote, and a plain `git pull` would happily bring the unwanted commit right back.
+
+## How I figured out what state I was in
+
+Three commands told me everything:
+
+```bash
+# working tree and branch status
+git status
+
+# local branch vs its remote branch
+git branch -vv
+
+# the commit graph, local and remote together
+git log --oneline --graph --decorate --all -15
+```
+
+The graph made it obvious. My local `feature/x` sat one commit below `origin/feature/x`, and that extra commit on the remote was the one I wanted gone.
+
+## Before you fix it: look at what you're deleting
+
+Before touching the remote, check exactly what is on it that you don't have locally:
+
+```bash
+git log --oneline HEAD..origin/feature/x
+git show --stat <commit-sha>
+```
+
+The first command lists the commits the remote has that you don't. The second shows which files that commit touched. Confirm it is really the commit everyone agreed to drop, and nothing else.
+
+## Two ways to fix it
+
+There are two honest options, and the right one depends on your team.
+
+### Option 1: git revert (the safe default)
+
+Revert doesn't erase history. It adds a new commit that undoes the old one.
+
+If you already did the hard reset like I did, first get back in sync with the remote:
+
+```bash
+git fetch origin
+git reset --hard origin/feature/x
+```
+
+Then undo the commit and push normally:
+
+```bash
+git revert <commit-sha>
+git push origin feature/x
+```
+
+No force push, no rewritten history, and nobody who already pulled the branch gets surprised. If other people might have pulled your branch, this is the option to pick.
+
+### Option 2: rewrite the remote with --force-with-lease
+
+This is what I did, after the team agreed that the commit should disappear from history entirely.
+
+```bash
+git fetch origin
+git push --force-with-lease origin feature/x
+```
+
+Why `--force-with-lease` and not `--force`? A plain `--force` overwrites the remote no matter what is there. The lease version refuses if someone pushed to the branch after your last fetch. It's a seatbelt: it stops you from wiping out a teammate's work you haven't seen.
+
+One catch: the lease is checked against what you last fetched. If you fetch and then push without looking, you've defeated the point. That's why the `git log HEAD..origin/feature/x` check above matters.
+
+Also, some repos have branch protection that blocks force pushes completely. If your push gets rejected, that may be on purpose, so talk to your team instead of looking for a workaround.
+
+## revert vs force-with-lease
+
+| | git revert | git push --force-with-lease |
+|---|---|---|
+| Rewrites history | No | Yes |
+| Safe if others pulled the branch | Yes | No, they must realign |
+| Commit disappears from history | No, an undo commit is added | Yes |
+| Needs team agreement | No | Yes |
+| Can be blocked by branch protection | No | Yes |
+
+## Verify it worked
+
+```bash
+git fetch origin
+git status
+git branch -vv
+```
+
+You want to see:
+
+```text
+Your branch is up to date with 'origin/feature/x'.
+
+nothing to commit, working tree clean
+```
+
+## After a force push, tell your team
+
+Anyone who already pulled the old commit now has history that doesn't match the remote. A quick message saves a lot of confusion. If they have no local work to keep, they can realign with:
+
+```bash
+git fetch origin
+git reset --hard origin/feature/x
+```
+
+## Two safety nets I now use
+
+**1. Make a backup branch before any reset.**
+
+```bash
+git branch backup-before-reset
+```
+
+It costs nothing, and if you reset the wrong thing, the old commits are still sitting on that branch.
+
+**2. Remember the reflog.** If you reset and immediately regret it, `git reflog` lists where your branch pointer has been recently. You can usually find the lost commit there and recover it with `git reset --hard <sha>`.
+
+## Other ways to undo the last commit
+
+Not every case needs a revert or a force push. If the commit is only on your machine, these are the common options:
+
+- `git reset --soft HEAD~1` moves the branch back one commit and keeps your changes staged. Use it to redo the commit.
+- `git reset --mixed HEAD~1` (the default) keeps your changes in the working tree, but unstaged.
+- `git reset --hard HEAD~1` throws the changes away completely.
+- `git commit --amend` rewrites the last commit, for example to fix the message or add a forgotten file.
+
+Once the commit is pushed, any of these needs the same care as above: they rewrite history, so a normal push will be rejected.
+
+## Quick reference
+
+- `git reset --hard HEAD~1` moves your local branch back one commit and discards tracked changes. Local only.
+- `git revert <sha>` undoes a commit by adding a new commit. Safe on shared branches.
+- `git push --force-with-lease` updates the remote after a history rewrite, but refuses if someone else pushed in the meantime.
+- `git fetch origin` downloads remote updates without merging them.
+- `git pull` fetches and merges, which would bring the unwanted commit back in my case.
+
+## Conclusion
+
+`git reset --hard` rewrites your local history, not GitHub's. If you need the remote to match, you either revert, or you rewrite it deliberately with `--force-with-lease` after your team agrees.
+
+And never run a blind `git push --force` on a shared branch. Look first, then push.
