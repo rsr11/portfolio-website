@@ -1,0 +1,223 @@
+---
+title: "Do You Really Need Elasticsearch? Start With the Data, Not the Tool"
+date: "2026-11-14"
+summary: "Before reaching for Elasticsearch, measure what PostgreSQL full-text search and pg_trgm can already do, and add a search engine only when the data demands it."
+tags: ["PostgreSQL", "System Design", "Backend"]
+cover: "/images/blog/do-you-really-need-elasticsearch.png"
+draft: false
+---
+
+## Introduction
+
+Someone asks, "How would you design a search system?"
+
+My first reflex used to be: *let's use Elasticsearch.* It's built for search, so it feels like the correct answer.
+
+But while working on a search feature for a real product, I stopped and asked a different set of questions first:
+
+- How much data do we have **right now**?
+- How fast will it grow?
+- What kinds of searches do users actually run?
+
+The answers changed my decision. This post is about that decision, and why **starting with the data, not the tool**, can save a team a lot of time and money.
+
+> Note: the tables and column names here are general examples, not from any real system.
+
+## The problem: one search bar, many sources
+
+Imagine a healthcare directory with a single search bar. A user can type:
+
+- a doctor's name
+- a clinic's name
+- a specialization
+- a health concern, like "chest pain"
+
+The data lives in different places:
+
+- `doctors`: structured doctor profiles
+- `clinics`: registered clinics with their own structure
+- `directory_listings`: extra clinic information, some of it stored as JSONB
+
+And there is a strict ranking rule: **doctors first, then registered clinics, then directory listings.**
+
+This isn't a simple `WHERE name = ?` anymore. It needs partial matches, typo tolerance, autocomplete and ranking across different tables.
+
+## Why basic ILIKE isn't enough
+
+The first attempt is usually this:
+
+```sql
+SELECT * FROM doctors WHERE name ILIKE '%cardio%';
+```
+
+It works on a small table. The problem is that a normal B-tree index can't help with a leading wildcard like `%cardio%`, so Postgres scans the whole table. It also gives you no ranking, and a typo like "cardeo" returns nothing.
+
+Many teams stop here and conclude, "Postgres can't do search, we need Elasticsearch."
+
+That conclusion is often premature.
+
+## What PostgreSQL already gives you
+
+Postgres has real search features built in:
+
+- **Full-text search** (`tsvector`, `tsquery`) for word-based matching, with ranking through `ts_rank`
+- **`pg_trgm`** for fuzzy and partial matching, which helps with typos and autocomplete
+- **GIN indexes** so these searches don't scan the whole table
+- **JSONB support**, so text inside JSONB columns can be searched too
+
+### Trigram index for names and typos
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX idx_doctors_name_trgm
+  ON doctors USING GIN (name gin_trgm_ops);
+
+CREATE INDEX idx_clinics_name_trgm
+  ON clinics USING GIN (name gin_trgm_ops);
+```
+
+With this index, `ILIKE '%term%'` and the similarity operator `%` can use the index instead of scanning every row.
+
+### Full-text search for descriptive fields
+
+```sql
+ALTER TABLE doctors
+  ADD COLUMN search_vector tsvector
+  GENERATED ALWAYS AS (
+    to_tsvector('simple', coalesce(name, '') || ' ' || coalesce(specialization, ''))
+  ) STORED;
+
+CREATE INDEX idx_doctors_search_vector
+  ON doctors USING GIN (search_vector);
+```
+
+I used the `simple` configuration because names shouldn't be stemmed like normal English words.
+
+### Connecting health concerns to specializations
+
+Users search for "chest pain", not "cardiologist". A small mapping table handles that:
+
+```sql
+CREATE TABLE concern_specializations (
+  concern         text NOT NULL,
+  specialization  text NOT NULL,
+  PRIMARY KEY (concern, specialization)
+);
+```
+
+Search the concern, find the matching specializations, then find the doctors with those specializations. This part is data design, not search technology, and you'd need it with Elasticsearch too.
+
+## One query, strict ranking
+
+The ranking rule becomes a simple `priority` column across a `UNION ALL`:
+
+```sql
+SELECT id, name, 'doctor' AS type, 1 AS priority,
+       similarity(name, 'cardio') AS score
+FROM doctors
+WHERE name ILIKE 'cardio%' OR name % 'cardio'
+
+UNION ALL
+
+SELECT id, name, 'clinic' AS type, 2 AS priority,
+       similarity(name, 'cardio') AS score
+FROM clinics
+WHERE name ILIKE 'cardio%' OR name % 'cardio'
+
+UNION ALL
+
+SELECT id, name, 'directory' AS type, 3 AS priority,
+       similarity(name, 'cardio') AS score
+FROM directory_listings
+WHERE name ILIKE 'cardio%' OR name % 'cardio'
+
+ORDER BY priority, score DESC
+LIMIT 10;
+```
+
+Doctors always come before clinics, and clinics before directory listings. Within each group, the closest match comes first.
+
+If this query gets too heavy as the sources grow, the next step is still inside Postgres: a **materialized view** or a dedicated `search_index` table that stores the normalized search data for all three sources.
+
+## Don't trust it, check it yourself
+
+This is the most important step. Before deciding Postgres is enough (or not enough), measure it on **your own data**. You don't need any special tool, just a few commands.
+
+Say you have three tables: `a` (the main entity), `b` (a related entity), and `c` (a join table connecting them). Your search joins them and filters on a text column:
+
+```sql
+SELECT a.id, a.name, b.name
+FROM a
+JOIN c ON c.a_id = a.id
+JOIN b ON b.id = c.b_id
+WHERE a.name ILIKE '%term%' AND b.city = 'City 2';
+```
+
+**Step 1: count your rows.** Know how big each table is right now.
+
+```sql
+SELECT count(*) FROM a;
+```
+
+**Step 2: run the query with `EXPLAIN (ANALYZE, BUFFERS)` in front of it.**
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT a.id, a.name, b.name
+FROM a
+JOIN c ON c.a_id = a.id
+JOIN b ON b.id = c.b_id
+WHERE a.name ILIKE '%term%' AND b.city = 'City 2';
+```
+
+**Step 3: read three things in the output.**
+
+- the scan type: `Seq Scan` means Postgres read the whole table, `Index Scan` or `Bitmap Index Scan` means it used an index
+- `Rows Removed by Filter`: a big number here means a lot of wasted work
+- `Execution Time` at the bottom, in milliseconds
+
+Run it two or three times and use the later runs, because the first one is often slower while the cache is cold.
+
+**Step 4: if you see a Seq Scan on a large table, add an index and run it again.**
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE INDEX idx_a_name_trgm ON a USING GIN (name gin_trgm_ops);
+ANALYZE a;
+```
+
+Now run the same `EXPLAIN (ANALYZE, BUFFERS)` and compare the scan type and the time.
+
+A few things I learned from doing this:
+
+- **On a tiny table, a Seq Scan is the right choice.** I ran this on a table with 4 rows and Postgres did a Seq Scan in a fraction of a millisecond. Even with an index it would keep scanning, because reading 4 rows is cheaper than using an index. At that size you don't need anything fancy.
+- **The index helps most when the search matches few rows.** If a filter matches a big share of the table, Postgres may still choose a Seq Scan, and that's normal.
+- **Test on staging or your local machine, not production.**
+
+Your own numbers, at your own data size, are what make this decision defensible.
+
+## When Elasticsearch does make sense
+
+I'm not saying Elasticsearch is bad. It's excellent. The point is **when** to add it. Signs that it may be time:
+
+| Signal | What it means |
+|---|---|
+| Query latency keeps rising even after indexing and tuning | The database is struggling with the search load |
+| Data size is far beyond what one Postgres instance handles comfortably | You need a system built to distribute search |
+| Search load is hurting your main database | Search should move to its own system |
+| You need advanced relevance tuning, facets or multi-language analysis | These are Elasticsearch's strengths |
+
+If your measurements show these problems, add Elasticsearch then. By that point you'll have real data about what to tune, and that is a much better position than guessing at the start.
+
+## Keep the door open
+
+A simple way to stay flexible: put search behind **one function or service**, for example `searchProviders(query)`. Today it runs the Postgres query. Later it can call Elasticsearch, and the rest of your app doesn't change.
+
+## Conclusion
+
+We have a lot of powerful technologies, and it's tempting to use them all. But a tool should be added because the data demands it, not because it's the standard answer.
+
+Before choosing, ask how much data you have now, how fast it grows, and what Postgres can already do for you. If it's enough today, you save the team time, money and extra infrastructure to maintain. When the numbers say it's time to scale, you add the next tool with evidence.
+
+Good backend engineering isn't always about adding more technology. Sometimes it's about understanding the data you already have and designing the right abstractions around it.
